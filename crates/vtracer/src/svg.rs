@@ -125,6 +125,12 @@ fn shape_fill(shape: &Shape) -> String {
 }
 
 /// Streaming SVG-path encoder that tracks the current point.
+///
+/// Numbers and candidate tokens are formatted into reused scratch buffers
+/// (`cand`/`numbuf`) rather than fresh allocations per segment; the shortest
+/// candidate is kept in `best`. Selection is identical to the old
+/// `min_by_key(len)` / `shorter` logic (first candidate wins ties), so output
+/// is byte-for-byte unchanged.
 struct Emitter {
     relative: bool,
     shorthands: bool,
@@ -136,6 +142,12 @@ struct Emitter {
     started: bool,
     /// Absolute second control point of the previous cubic, for `S` detection.
     prev_cubic_c2: Option<PointF64>,
+    /// Scratch: the candidate token currently being built.
+    cand: String,
+    /// Scratch: the shortest candidate seen for the current command.
+    best: String,
+    /// Scratch: one number at a time (for trimming before it lands in `cand`).
+    numbuf: String,
 }
 
 impl Emitter {
@@ -149,6 +161,9 @@ impl Emitter {
             subpath_start: PointF64::default(),
             started: false,
             prev_cubic_c2: None,
+            cand: String::new(),
+            best: String::new(),
+            numbuf: String::new(),
         }
     }
 
@@ -174,125 +189,119 @@ impl Emitter {
     }
 
     fn move_to(&mut self, p: PointF64) {
-        if !self.started {
+        let Emitter { out, cand, best, numbuf, cur, precision, relative, started, subpath_start, prev_cubic_c2, .. } = self;
+        if !*started {
             // First move is always absolute.
-            let token = format!("M{}", self.coord(p));
-            self.out.push_str(&token);
-            self.started = true;
+            out.push('M');
+            push_coord(out, numbuf, p, *precision);
+            *started = true;
         } else {
-            let abs = format!("M{}", self.coord(p));
-            let token = if self.relative {
-                let rel = format!("m{}", self.coord_delta(p));
-                shorter(abs, rel)
-            } else {
-                abs
-            };
-            self.out.push_str(&token);
+            best.clear();
+            cand.clear();
+            cand.push('M');
+            push_coord(cand, numbuf, p, *precision);
+            consider(best, cand);
+            if *relative {
+                cand.clear();
+                cand.push('m');
+                push_coord_delta(cand, numbuf, p, *cur, *precision);
+                consider(best, cand);
+            }
+            out.push_str(best);
         }
-        self.cur = p;
-        self.subpath_start = p;
-        self.prev_cubic_c2 = None;
+        *cur = p;
+        *subpath_start = p;
+        *prev_cubic_c2 = None;
     }
 
     fn line_to(&mut self, p: PointF64) {
-        let mut candidates: Vec<String> = Vec::new();
+        let Emitter { out, cand, best, numbuf, cur, precision, relative, shorthands, prev_cubic_c2, .. } = self;
+        best.clear();
 
         // Axis-aligned shorthands.
-        if self.shorthands {
-            if p.y == self.cur.y {
-                candidates.push(format!("H{}", self.num(p.x)));
-                if self.relative {
-                    candidates.push(format!("h{}", self.num(p.x - self.cur.x)));
+        if *shorthands {
+            if p.y == cur.y {
+                cand.clear();
+                cand.push('H');
+                push_list_num(cand, numbuf, p.x, *precision, true);
+                consider(best, cand);
+                if *relative {
+                    cand.clear();
+                    cand.push('h');
+                    push_list_num(cand, numbuf, p.x - cur.x, *precision, true);
+                    consider(best, cand);
                 }
             }
-            if p.x == self.cur.x {
-                candidates.push(format!("V{}", self.num(p.y)));
-                if self.relative {
-                    candidates.push(format!("v{}", self.num(p.y - self.cur.y)));
+            if p.x == cur.x {
+                cand.clear();
+                cand.push('V');
+                push_list_num(cand, numbuf, p.y, *precision, true);
+                consider(best, cand);
+                if *relative {
+                    cand.clear();
+                    cand.push('v');
+                    push_list_num(cand, numbuf, p.y - cur.y, *precision, true);
+                    consider(best, cand);
                 }
             }
         }
 
-        candidates.push(format!("L{}", self.coord(p)));
-        if self.relative {
-            candidates.push(format!("l{}", self.coord_delta(p)));
+        cand.clear();
+        cand.push('L');
+        push_coord(cand, numbuf, p, *precision);
+        consider(best, cand);
+        if *relative {
+            cand.clear();
+            cand.push('l');
+            push_coord_delta(cand, numbuf, p, *cur, *precision);
+            consider(best, cand);
         }
 
-        self.out.push_str(&shortest(candidates));
-        self.cur = p;
-        self.prev_cubic_c2 = None;
+        out.push_str(best);
+        *cur = p;
+        *prev_cubic_c2 = None;
     }
 
     fn cubic_to(&mut self, c1: PointF64, c2: PointF64, e: PointF64) {
-        let mut candidates: Vec<String> = Vec::new();
+        let Emitter { out, cand, best, numbuf, cur, precision, relative, shorthands, prev_cubic_c2, .. } = self;
+        best.clear();
 
         // Smooth continuation: c1 is the reflection of the previous cubic's c2.
-        if self.shorthands {
-            if let Some(prev_c2) = self.prev_cubic_c2 {
+        if *shorthands {
+            if let Some(prev_c2) = *prev_cubic_c2 {
                 let reflection = PointF64 {
-                    x: 2.0 * self.cur.x - prev_c2.x,
-                    y: 2.0 * self.cur.y - prev_c2.y,
+                    x: 2.0 * cur.x - prev_c2.x,
+                    y: 2.0 * cur.y - prev_c2.y,
                 };
                 if approx(reflection, c1) {
-                    candidates.push(format!(
-                        "S{}",
-                        self.coord_list(&[c2, e])
-                    ));
-                    if self.relative {
-                        candidates.push(format!(
-                            "s{}",
-                            self.delta_list(&[c2, e])
-                        ));
+                    cand.clear();
+                    cand.push('S');
+                    push_coord_list(cand, numbuf, &[c2, e], *precision);
+                    consider(best, cand);
+                    if *relative {
+                        cand.clear();
+                        cand.push('s');
+                        push_delta_list(cand, numbuf, &[c2, e], *cur, *precision);
+                        consider(best, cand);
                     }
                 }
             }
         }
 
-        candidates.push(format!("C{}", self.coord_list(&[c1, c2, e])));
-        if self.relative {
-            candidates.push(format!("c{}", self.delta_list(&[c1, c2, e])));
+        cand.clear();
+        cand.push('C');
+        push_coord_list(cand, numbuf, &[c1, c2, e], *precision);
+        consider(best, cand);
+        if *relative {
+            cand.clear();
+            cand.push('c');
+            push_delta_list(cand, numbuf, &[c1, c2, e], *cur, *precision);
+            consider(best, cand);
         }
 
-        self.out.push_str(&shortest(candidates));
-        self.cur = e;
-        self.prev_cubic_c2 = Some(c2);
-    }
-
-    // --- number/coordinate formatting -------------------------------------
-
-    fn num(&self, v: f64) -> String {
-        fmt_num(v, self.precision)
-    }
-
-    /// Absolute coordinate pair.
-    fn coord(&self, p: PointF64) -> String {
-        join_nums(&[self.num(p.x), self.num(p.y)])
-    }
-
-    /// Delta coordinate pair relative to the current point.
-    fn coord_delta(&self, p: PointF64) -> String {
-        join_nums(&[self.num(p.x - self.cur.x), self.num(p.y - self.cur.y)])
-    }
-
-    /// Absolute list of points, flattened.
-    fn coord_list(&self, pts: &[PointF64]) -> String {
-        let mut nums = Vec::with_capacity(pts.len() * 2);
-        for p in pts {
-            nums.push(self.num(p.x));
-            nums.push(self.num(p.y));
-        }
-        join_nums(&nums)
-    }
-
-    /// Delta list of points relative to the current point (all deltas are from
-    /// `cur`, matching SVG's relative-command semantics for multi-point ops).
-    fn delta_list(&self, pts: &[PointF64]) -> String {
-        let mut nums = Vec::with_capacity(pts.len() * 2);
-        for p in pts {
-            nums.push(self.num(p.x - self.cur.x));
-            nums.push(self.num(p.y - self.cur.y));
-        }
-        join_nums(&nums)
+        out.push_str(best);
+        *cur = e;
+        *prev_cubic_c2 = Some(c2);
     }
 }
 
@@ -300,23 +309,104 @@ fn approx(a: PointF64, b: PointF64) -> bool {
     (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6
 }
 
-fn shorter(a: String, b: String) -> String {
-    if b.len() < a.len() {
-        b
-    } else {
-        a
+/// Keep the shortest candidate; ties keep the earlier one (matches the old
+/// `min_by_key`/`shorter`). `best` empty means no candidate chosen yet.
+fn consider(best: &mut String, cand: &str) {
+    if best.is_empty() || cand.len() < best.len() {
+        best.clear();
+        best.push_str(cand);
     }
 }
 
-fn shortest(candidates: Vec<String>) -> String {
-    candidates
-        .into_iter()
-        .min_by_key(|s| s.len())
-        .unwrap_or_default()
+/// Append one number to `buf`, prefixing the SVG list separator (a comma,
+/// unless the number is self-separating with a leading `-`, or it is the first
+/// in its list). Mirrors [`join_nums`] streamed one number at a time.
+fn push_list_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32>, first: bool) {
+    let start = buf.len();
+    push_num(buf, numbuf, v, precision);
+    if !first && buf.as_bytes()[start] != b'-' {
+        // The number sits at `start..`; splicing a comma in front of it shifts
+        // only those few bytes.
+        buf.insert(start, ',');
+    }
+}
+
+/// Absolute coordinate pair after a command letter.
+fn push_coord(buf: &mut String, numbuf: &mut String, p: PointF64, precision: Option<u32>) {
+    push_list_num(buf, numbuf, p.x, precision, true);
+    push_list_num(buf, numbuf, p.y, precision, false);
+}
+
+/// Delta coordinate pair relative to `cur`.
+fn push_coord_delta(buf: &mut String, numbuf: &mut String, p: PointF64, cur: PointF64, precision: Option<u32>) {
+    push_list_num(buf, numbuf, p.x - cur.x, precision, true);
+    push_list_num(buf, numbuf, p.y - cur.y, precision, false);
+}
+
+/// Absolute list of points, flattened.
+fn push_coord_list(buf: &mut String, numbuf: &mut String, pts: &[PointF64], precision: Option<u32>) {
+    for (i, p) in pts.iter().enumerate() {
+        push_list_num(buf, numbuf, p.x, precision, i == 0);
+        push_list_num(buf, numbuf, p.y, precision, false);
+    }
+}
+
+/// Delta list of points relative to `cur` (all deltas are from `cur`, matching
+/// SVG's relative-command semantics for multi-point ops).
+fn push_delta_list(buf: &mut String, numbuf: &mut String, pts: &[PointF64], cur: PointF64, precision: Option<u32>) {
+    for (i, p) in pts.iter().enumerate() {
+        push_list_num(buf, numbuf, p.x - cur.x, precision, i == 0);
+        push_list_num(buf, numbuf, p.y - cur.y, precision, false);
+    }
+}
+
+/// Append compact number formatting to `buf`: round to precision, trim trailing
+/// zeros, leading-dot for magnitudes below 1. `numbuf` is reused scratch.
+fn push_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32>) {
+    let v = match precision {
+        Some(p) => {
+            let factor = 10f64.powi(p as i32);
+            (v * factor).round() / factor
+        }
+        None => v,
+    };
+    // Normalize -0.0 to 0.
+    if v == 0.0 {
+        buf.push('0');
+        return;
+    }
+
+    numbuf.clear();
+    match precision {
+        Some(p) => {
+            let _ = write!(numbuf, "{:.*}", p as usize, v);
+        }
+        None => {
+            let _ = write!(numbuf, "{v}");
+        }
+    }
+
+    let mut s: &str = numbuf;
+    if s.contains('.') {
+        s = s.trim_end_matches('0');
+        s = s.trim_end_matches('.');
+    }
+
+    if let Some(rest) = s.strip_prefix("0.") {
+        buf.push('.');
+        buf.push_str(rest);
+    } else if let Some(rest) = s.strip_prefix("-0.") {
+        buf.push_str("-.");
+        buf.push_str(rest);
+    } else {
+        buf.push_str(s);
+    }
 }
 
 /// Join formatted numbers with the minimal separators SVG allows: a comma,
-/// except that a leading `-` is self-separating.
+/// except that a leading `-` is self-separating. (Retained for tests; the
+/// encoder streams via [`push_list_num`].)
+#[cfg(test)]
 fn join_nums(nums: &[String]) -> String {
     let mut s = String::new();
     for (i, n) in nums.iter().enumerate() {
@@ -328,42 +418,13 @@ fn join_nums(nums: &[String]) -> String {
     s
 }
 
-/// Compact number formatting: round to precision, trim trailing zeros, use a
-/// leading-dot for magnitudes below 1.
+/// Compact number formatting (owned-`String` form; retained for tests).
+#[cfg(test)]
 fn fmt_num(v: f64, precision: Option<u32>) -> String {
-    let v = match precision {
-        Some(p) => {
-            let factor = 10f64.powi(p as i32);
-            (v * factor).round() / factor
-        }
-        None => v,
-    };
-    // Normalize -0.0 to 0.
-    if v == 0.0 {
-        return "0".to_string();
-    }
-
-    let mut s = match precision {
-        Some(p) => format!("{:.*}", p as usize, v),
-        None => format!("{v}"),
-    };
-
-    if s.contains('.') {
-        while s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-    }
-
-    if let Some(rest) = s.strip_prefix("0.") {
-        s = format!(".{rest}");
-    } else if let Some(rest) = s.strip_prefix("-0.") {
-        s = format!("-.{rest}");
-    }
-
-    s
+    let mut buf = String::new();
+    let mut numbuf = String::new();
+    push_num(&mut buf, &mut numbuf, v, precision);
+    buf
 }
 
 #[cfg(test)]
