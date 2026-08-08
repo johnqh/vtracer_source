@@ -26,6 +26,11 @@ license = "MIT OR Apache-2.0"
 homepage = "http://www.visioncortex.org/vtracer"
 repository = "https://github.com/visioncortex/vtracer/"
 
+# Use the local visioncortex fork (stage-2 area index + profiling) instead of
+# the crates.io release, so the golden/equivalence tests validate the change.
+[patch.crates-io]
+visioncortex = { path = "../visioncortex" }
+
 [workspace.dependencies]
 visioncortex = "0.9.1"
 # Schneider curve fitting for the simplify pass. visioncortex pins an old

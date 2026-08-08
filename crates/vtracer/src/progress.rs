@@ -94,6 +94,12 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A clone of the cancel token for checking cancellation off-thread (e.g.
+    /// inside a rayon parallel region, where `&mut self` cannot cross threads).
+    pub fn cancel_token(&self) -> CancelToken {
+        self.cancel.clone()
+    }
+
     /// Return [`Error::Cancelled`] if cancellation has been requested.
     pub fn check(&self) -> Result<(), Error> {
         if self.cancel.is_cancelled() {

@@ -17,6 +17,9 @@ use crate::mosaic::{compose_mosaic, SegmentFitter};
 use crate::progress::{Ctx, Phase};
 use crate::simplify::CurvePass;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 /// Which compositing strategy the pipeline uses. Each variant owns its fitter.
 pub enum Compositing {
     /// Independent per-region closed outlines, stacked bottom-to-top.
@@ -87,6 +90,25 @@ fn fit_region(
     path
 }
 
+/// Fit one layer into its painted [`Shape`], or `None` if it traced empty.
+/// Pure over its inputs (the fitter and passes are `&`-shared), so it is safe
+/// to call concurrently across layers.
+fn fit_layer(
+    fitter: &dyn CurveFitter,
+    layer: &crate::ir::Layer,
+    passes: &[Box<dyn CurvePass>],
+) -> Option<Shape> {
+    let path = fit_region(fitter, &layer.mask, passes);
+    if path.is_empty() {
+        None
+    } else {
+        Some(Shape {
+            paint: layer.paint,
+            path,
+        })
+    }
+}
+
 /// Progress-aware [`compose_stacked`]: reports after each layer and checks for
 /// cancellation between them.
 fn compose_stacked_with(
@@ -95,37 +117,75 @@ fn compose_stacked_with(
     passes: &[Box<dyn CurvePass>],
     ctx: &mut Ctx,
 ) -> Result<VectorDoc, Error> {
-    let mut doc = VectorDoc::new(seg.width, seg.height);
-    let total = seg.layers.len().max(1);
-    for (i, layer) in seg.layers.iter().enumerate() {
-        ctx.check()?;
-        let path = fit_region(fitter, &layer.mask, passes);
-        if !path.is_empty() {
-            doc.shapes.push(Shape {
-                paint: layer.paint,
-                path,
-            });
+    ctx.check()?;
+    ctx.report(Phase::Compose, 0.0);
+
+    // Parallel fits can't call the `&mut` progress sink, so Compose reports
+    // coarsely (0 -> 1) like mosaic mode. Cancellation stays responsive: each
+    // layer checks a cloned token and bails to `None`, and the post-region
+    // `check()` turns a tripped token into `Error::Cancelled` before the
+    // partial doc is used.
+    #[cfg(feature = "parallel")]
+    let shapes: Vec<Option<Shape>> = {
+        let token = ctx.cancel_token();
+        seg.layers
+            .par_iter()
+            .map(|layer| {
+                if token.is_cancelled() {
+                    return None;
+                }
+                fit_layer(fitter, layer, passes)
+            })
+            .collect()
+    };
+
+    // Sequential fallback keeps the original fine-grained per-layer progress.
+    #[cfg(not(feature = "parallel"))]
+    let shapes: Vec<Option<Shape>> = {
+        let total = seg.layers.len().max(1);
+        let mut out = Vec::with_capacity(seg.layers.len());
+        for (i, layer) in seg.layers.iter().enumerate() {
+            ctx.check()?;
+            out.push(fit_layer(fitter, layer, passes));
+            ctx.report(Phase::Compose, (i + 1) as f32 / total as f32);
         }
-        ctx.report(Phase::Compose, (i + 1) as f32 / total as f32);
-    }
+        out
+    };
+
+    ctx.check()?;
+
+    let mut doc = VectorDoc::new(seg.width, seg.height);
+    doc.shapes.extend(shapes.into_iter().flatten());
+    ctx.report(Phase::Compose, 1.0);
     Ok(doc)
 }
 
 /// Trace every layer's closed outline and stack the shapes in paint order.
+///
+/// With the `parallel` feature the per-layer fits run concurrently; the
+/// order-preserving `collect` keeps the bottom-to-top paint order identical to
+/// the sequential path, so the output is unchanged.
 pub fn compose_stacked(
     seg: &Segmentation,
     fitter: &dyn CurveFitter,
     passes: &[Box<dyn CurvePass>],
 ) -> VectorDoc {
     let mut doc = VectorDoc::new(seg.width, seg.height);
-    for layer in &seg.layers {
-        let path = fit_region(fitter, &layer.mask, passes);
-        if !path.is_empty() {
-            doc.shapes.push(Shape {
-                paint: layer.paint,
-                path,
-            });
-        }
-    }
+
+    #[cfg(feature = "parallel")]
+    let shapes: Vec<Option<Shape>> = seg
+        .layers
+        .par_iter()
+        .map(|layer| fit_layer(fitter, layer, passes))
+        .collect();
+
+    #[cfg(not(feature = "parallel"))]
+    let shapes: Vec<Option<Shape>> = seg
+        .layers
+        .iter()
+        .map(|layer| fit_layer(fitter, layer, passes))
+        .collect();
+
+    doc.shapes.extend(shapes.into_iter().flatten());
     doc
 }

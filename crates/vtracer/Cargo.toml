@@ -15,13 +15,22 @@ readme = "../../README.md"
 name = "vtracer"
 path = "src/lib.rs"
 
+[features]
+# Parallelize compositing across regions with rayon. On by default for native
+# builds; disable (e.g. `--no-default-features`) for wasm32, which has no
+# threads unless you wire up wasm-bindgen-rayon.
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
 [dependencies]
 visioncortex.workspace = true
 flo_curves.workspace = true
+rayon = { version = "1", optional = true }
 
 [dev-dependencies]
 # Rasterize-and-diff equivalence tests (stacked vs mosaic). Test-only; not
 # compiled for wasm targets, so the library stays wasm-safe.
 resvg = "0.45"
-# Decode the sample photo for the spline-fitting regression test. Test-only.
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# Decode sample rasters for the spline-fitting regression test and the timing
+# example. Test/example-only. png added for the timing harness's icon/screenshot inputs.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
