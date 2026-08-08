@@ -362,7 +362,56 @@ fn push_delta_list(buf: &mut String, numbuf: &mut String, pts: &[PointF64], cur:
 
 /// Append compact number formatting to `buf`: round to precision, trim trailing
 /// zeros, leading-dot for magnitudes below 1. `numbuf` is reused scratch.
+///
+/// For fixed precision the number is formatted from the scaled *integer*
+/// `round(v * 10^p)` — integer formatting, not float. This is byte-identical to
+/// the old `format!("{:.p}", (v*f).round()/f)`: below ~2^51 the scaled value is
+/// an exact f64 integer and `{:.p}` of it reproduces exactly those digits, so
+/// the two agree. Values above that safe range (or `precision == None`) fall
+/// back to the float formatter.
 fn push_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32>) {
+    if let Some(p) = precision {
+        if p <= 15 {
+            let factor = 10f64.powi(p as i32);
+            let scaled = (v * factor).round();
+            // Normalize -0.0 to 0.
+            if scaled == 0.0 {
+                buf.push('0');
+                return;
+            }
+            if scaled.abs() < 9.0e15 {
+                push_num_fixed(buf, numbuf, scaled as i64, p);
+                return;
+            }
+        }
+    }
+    push_num_float(buf, numbuf, v, precision);
+}
+
+/// Fixed-precision integer path: `n` is `round(v * 10^p)`, already non-zero.
+fn push_num_fixed(buf: &mut String, numbuf: &mut String, n: i64, p: u32) {
+    if n < 0 {
+        buf.push('-');
+    }
+    let a = n.unsigned_abs();
+    let scale = 10u64.pow(p);
+    let int = a / scale;
+    let frac = a % scale;
+    if int != 0 {
+        let _ = write!(buf, "{int}");
+    }
+    // int == 0 emits the leading-dot form (".5", "-.5") — no "0" before the dot.
+    if frac != 0 {
+        buf.push('.');
+        numbuf.clear();
+        let _ = write!(numbuf, "{frac:0width$}", width = p as usize);
+        buf.push_str(numbuf.trim_end_matches('0'));
+    }
+}
+
+/// Float-formatter fallback (full precision, or magnitudes past the safe
+/// integer range). Same trim/leading-dot rules as the fixed path.
+fn push_num_float(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32>) {
     let v = match precision {
         Some(p) => {
             let factor = 10f64.powi(p as i32);
@@ -370,7 +419,6 @@ fn push_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32
         }
         None => v,
     };
-    // Normalize -0.0 to 0.
     if v == 0.0 {
         buf.push('0');
         return;
@@ -432,6 +480,26 @@ mod tests {
     use super::*;
     use crate::ir::{MultiPath, Paint, PathCmd, Shape, SubPath};
     use visioncortex::Color;
+
+    /// The integer fast path must be byte-identical to the float formatter it
+    /// replaces, across a wide range of magnitudes, signs, and precisions.
+    #[test]
+    fn fixed_path_matches_float_path() {
+        for &p in &[0u32, 1, 2, 3, 4] {
+            let factor = 10f64.powi(p as i32);
+            // A spread of values incl. carries, negatives, sub-1, round numbers.
+            let mut v = -5000.0f64;
+            while v <= 5000.0 {
+                let mut fixed = String::new();
+                let mut float = String::new();
+                let mut scratch = String::new();
+                push_num(&mut fixed, &mut scratch, v, Some(p));
+                push_num_float(&mut float, &mut scratch, v, Some(p));
+                assert_eq!(fixed, float, "mismatch at v={v}, p={p}");
+                v += 1.0 / (factor / 7.0).max(1.0) + 0.017;
+            }
+        }
+    }
 
     #[test]
     fn number_formatting() {
