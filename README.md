@@ -33,6 +33,37 @@ VTracer is originally designed for processing high resolution scans of historic 
 
 Technical descriptions of the [tracing algorithm](https://www.visioncortex.org/vtracer-docs) and [clustering algorithm](https://www.visioncortex.org/impression-docs).
 
+## This fork (`johnqh/vtracer_source`)
+
+This is a **performance fork** of `visioncortex/vtracer`, deployed in-house. Two
+things differ from upstream:
+
+- **Core-library dependency.** It builds against our
+  [`johnqh/visioncortex`](https://github.com/johnqh/visioncortex) fork (which
+  holds the clustering-stage optimizations), wired in via
+  `[patch.crates-io] visioncortex = { path = "../visioncortex" }` in the
+  workspace `Cargo.toml`. **The two repos must be checked out as siblings**
+  (`vtracer_source/` and `visioncortex/` in the same parent directory) for the
+  build to resolve — locally and in CI/Docker alike.
+
+- **Deployment.** The CLI binary ships as the multi-arch Docker image
+  [`johnqh/vtracer`](https://github.com/johnqh/vtracer), whose `Dockerfile`
+  clones both forks (they're public) and builds `-p vtracer-cli`. `svgr_api`
+  copies the binary out of that image, so `johnqh/vtracer` is how this fork
+  reaches production. To ship a change: push here, then bump `LABEL version` in
+  the `johnqh/vtracer` Dockerfile (that repo's CI builds + pushes
+  `johnqh/vtracer:latest`).
+
+- **`svgr_api` CLI compatibility.** `svgr_api` invokes the binary with the
+  legacy vtracer 0.6.x flag names (`--colormode`, and snake_case
+  `--filter_speckle`, `--color_precision`, `--gradient_step`,
+  `--path_precision`, `--corner_threshold`, `--segment_length`,
+  `--splice_threshold`). This CLI is kebab-case and renamed
+  `--colormode`→`--clustering`, so `crates/vtracer-cli/src/main.rs` carries an
+  invisible `alias` for each of those 0.6.x names — making this build a drop-in
+  replacement for the crates.io 0.6.5 binary with no change to `svgr_api`. **Do
+  not remove those aliases without updating `svgr_api/src/services/vtracer.ts`.**
+
 ## Desktop App
 
 ![screenshot](docs/images/desktop-app.png)

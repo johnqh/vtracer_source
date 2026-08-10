@@ -12,6 +12,21 @@ use visioncortex::{Color, ColorImage};
 use vtracer::{Clustering, Config, FitMode, Hierarchical, Preset};
 
 /// Convert an image into vector graphics.
+///
+/// ## 0.6.x / `svgr_api` compatibility aliases
+///
+/// Flags are kebab-case (`--filter-speckle`), but several carry an invisible
+/// `alias` to their legacy snake_case name from vtracer 0.6.x, plus
+/// `--colormode` as an alias for `--clustering`. This is deliberate: the
+/// `johnqh/svgr_api` service invokes this binary with the 0.6.x names
+/// (`--colormode color`, `--filter_speckle`, `--color_precision`,
+/// `--gradient_step`, `--path_precision`, `--corner_threshold`,
+/// `--segment_length`, `--splice_threshold`). Keeping the aliases lets the
+/// `johnqh/vtracer_source` build drop into that service in place of the
+/// crates.io 0.6.5 binary with **no change to svgr_api**. All the value ranges
+/// svgr_api passes already fall inside this CLI's ranges (its `segment_length`
+/// clamp of 3.5–10 matches `--segment-length`'s range exactly), so only the
+/// flag *names* needed bridging. Do not remove these without updating svgr_api.
 #[derive(Parser, Debug)]
 #[command(name = "vtracer", version, about, rename_all = "kebab-case")]
 struct Args {
@@ -36,7 +51,8 @@ struct Args {
     preset: Option<Preset>,
 
     /// Region forming: `color-cluster` (default), `bw`, or `watershed`.
-    #[arg(long)]
+    // `colormode`: 0.6.x/svgr_api name. Value "color" parses to color-cluster.
+    #[arg(long, alias = "colormode")]
     clustering: Option<Clustering>,
 
     /// Hierarchical clustering: `stacked` (default) or `cutout` (mosaic).
@@ -48,36 +64,43 @@ struct Args {
     mode: Option<FitMode>,
 
     /// Discard patches smaller than X px in size (0..=128).
-    #[arg(short = 'f', long, value_parser = clap::value_parser!(i64).range(0..=128))]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(short = 'f', long, alias = "filter_speckle", value_parser = clap::value_parser!(i64).range(0..=128))]
     filter_speckle: Option<i64>,
 
     /// Significant bits per RGB channel (1..=8).
-    #[arg(short = 'p', long, value_parser = clap::value_parser!(i64).range(1..=8))]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(short = 'p', long, alias = "color_precision", value_parser = clap::value_parser!(i64).range(1..=8))]
     color_precision: Option<i64>,
 
     /// Color difference between gradient layers (0..=255).
-    #[arg(short = 'g', long, value_parser = clap::value_parser!(i64).range(0..=255))]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(short = 'g', long, alias = "gradient_step", value_parser = clap::value_parser!(i64).range(0..=255))]
     gradient_step: Option<i64>,
 
     /// Minimum momentary angle (degrees) to be a corner (0..=180).
     ///
     /// Hidden from help: a fine-tuning knob few conversions need — the
     /// default (60) serves; `--simplify` is the knob worth reaching for.
-    #[arg(long, hide = true, value_parser = clap::value_parser!(i64).range(0..=180))]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(long, hide = true, alias = "corner_threshold", value_parser = clap::value_parser!(i64).range(0..=180))]
     corner_threshold: Option<i64>,
 
     /// Subdivide until all segments are shorter than this length (3.5..=10).
     ///
     /// Hidden from help: with `--simplify` reducing anchors by an explicit
     /// error tolerance, this legacy knob's effect on output is negligible.
-    #[arg(long, hide = true, value_parser = parse_segment_length)]
+    // alias: 0.6.x/svgr_api snake_case name. svgr_api clamps to 3.5–10, matching
+    // `parse_segment_length`'s range exactly.
+    #[arg(long, hide = true, alias = "segment_length", value_parser = parse_segment_length)]
     segment_length: Option<f64>,
 
     /// Minimum angle displacement (degrees) to splice a spline (0..=180).
     ///
     /// Hidden from help: a fine-tuning knob few conversions need — the
     /// default (45) serves; `--simplify` is the knob worth reaching for.
-    #[arg(long, hide = true, value_parser = clap::value_parser!(i64).range(0..=180))]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(long, hide = true, alias = "splice_threshold", value_parser = clap::value_parser!(i64).range(0..=180))]
     splice_threshold: Option<i64>,
 
     /// Simplify curves: fewest cubics within this tolerance in px (try 1-2.5).
@@ -85,7 +108,8 @@ struct Args {
     simplify: Option<f64>,
 
     /// Decimal places to use in path coordinates.
-    #[arg(long)]
+    // alias: 0.6.x/svgr_api snake_case name.
+    #[arg(long, alias = "path_precision")]
     path_precision: Option<u32>,
 
     /// Fixed palette: comma-separated hex colors, e.g. '#112233,#445566'.
