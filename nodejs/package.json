@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "wasm-pack build --target nodejs --out-dir pkg",
-    "test": "node test.js",
+    "test:unit": "node test.js",
     "publish:local": "node scripts/publish.mjs",
     "prepublishOnly": "npm run build"
   },
