@@ -1,6 +1,8 @@
 //! `Session` caches the segmentation and re-segments only when a clustering
 //! parameter changes — verified both at the key level and end-to-end.
 
+#![allow(clippy::type_complexity)]
+
 use visioncortex::Color;
 use vtracer::{
     CancelToken, Clustering, ColorImage, Config, FitMode, Hierarchical, Session,

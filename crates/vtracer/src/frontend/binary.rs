@@ -61,6 +61,7 @@ impl Default for Threshold {
 /// Speckle removal drops clusters smaller than `min_area` px as the clusters
 /// are collected, matching the pre-1.0 binary path (`cluster.size() >= area`).
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct BinaryFrontend {
     /// How foreground pixels are selected (see [`Threshold`]).
     pub threshold: Threshold,
@@ -70,15 +71,6 @@ pub struct BinaryFrontend {
     pub min_area: usize,
 }
 
-impl Default for BinaryFrontend {
-    fn default() -> Self {
-        Self {
-            threshold: Threshold::default(),
-            diagonal: false,
-            min_area: 0,
-        }
-    }
-}
 
 impl BinaryFrontend {
     /// Binarize `img` into a foreground mask according to [`Self::threshold`].

@@ -84,7 +84,7 @@ fn ring() -> ColorImage {
         let dx = x as f64 - cx;
         let dy = y as f64 - cy;
         let d2 = dx * dx + dy * dy;
-        if d2 <= 20.0 * 20.0 && d2 >= 9.0 * 9.0 {
+        if (9.0 * 9.0..=20.0 * 20.0).contains(&d2) {
             (40, 90, 200, 255)
         } else {
             (245, 245, 245, 255)

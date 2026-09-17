@@ -67,7 +67,7 @@ impl Session {
     /// Whether the cached segmentation is missing or was clustered with
     /// different parameters than `key`.
     fn stale(&self, key: &SegmentKey) -> bool {
-        self.cache.as_ref().map_or(true, |(k, _)| k != key)
+        self.cache.as_ref().is_none_or(|(k, _)| k != key)
     }
 
     /// The cached segmentation. Only call after ensuring the cache is fresh.

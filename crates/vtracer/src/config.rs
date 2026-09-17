@@ -253,7 +253,7 @@ impl Config {
     fn segment_fitter(&self) -> Box<dyn SegmentFitter> {
         match self.mode {
             FitMode::Pixel => Box::new(PixelSegmentFitter),
-            FitMode::Polygon => Box::new(PolygonSegmentFitter::default()),
+            FitMode::Polygon => Box::new(PolygonSegmentFitter),
             FitMode::Spline => Box::new(SplineSegmentFitter {
                 corner_threshold: deg2rad(self.corner_threshold),
                 length_threshold: self.length_threshold,

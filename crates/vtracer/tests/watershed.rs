@@ -48,7 +48,7 @@ fn assert_stack(seg: &Segmentation, regions: usize) {
     let bottom = &seg.layers[0].mask;
     assert_eq!((bottom.width(), bottom.height()), (w, h), "bottom layer is full-canvas");
     assert_eq!(bottom.area(), w * h, "bottom layer is solid");
-    assert!(seg.layers.len() <= 2 * regions.max(1) - 1, "stack bounded by the merge tree");
+    assert!(seg.layers.len() < 2 * regions.max(1), "stack bounded by the merge tree");
 
     let labels = flatten(seg);
     assert!(labels.iter().all(|&l| l != usize::MAX), "every pixel covered");

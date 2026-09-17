@@ -104,13 +104,12 @@ fn cleanup_subpath(sub: &SubPath) -> SubPath {
                 if approx_eq(last, p) {
                     continue; // zero-length
                 }
-                if let Some(PathCmd::LineTo(_)) = out.commands.last() {
-                    if collinear(prev, last, p) {
+                if let Some(PathCmd::LineTo(_)) = out.commands.last()
+                    && collinear(prev, last, p) {
                         *out.commands.last_mut().unwrap() = PathCmd::LineTo(p);
                         last = p; // anchor `prev` unchanged
                         continue;
                     }
-                }
                 out.commands.push(PathCmd::LineTo(p));
                 prev = last;
                 last = p;

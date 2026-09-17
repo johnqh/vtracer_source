@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop, clippy::needless_update, clippy::approx_constant)]
+
 //! # vtracer
 //!
 //! Convert raster images into vector graphics (SVG). VTracer is a

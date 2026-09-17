@@ -267,8 +267,8 @@ impl Emitter {
         best.clear();
 
         // Smooth continuation: c1 is the reflection of the previous cubic's c2.
-        if *shorthands {
-            if let Some(prev_c2) = *prev_cubic_c2 {
+        if *shorthands
+            && let Some(prev_c2) = *prev_cubic_c2 {
                 let reflection = PointF64 {
                     x: 2.0 * cur.x - prev_c2.x,
                     y: 2.0 * cur.y - prev_c2.y,
@@ -286,7 +286,6 @@ impl Emitter {
                     }
                 }
             }
-        }
 
         cand.clear();
         cand.push('C');
@@ -370,8 +369,8 @@ fn push_delta_list(buf: &mut String, numbuf: &mut String, pts: &[PointF64], cur:
 /// the two agree. Values above that safe range (or `precision == None`) fall
 /// back to the float formatter.
 fn push_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32>) {
-    if let Some(p) = precision {
-        if p <= 15 {
+    if let Some(p) = precision
+        && p <= 15 {
             let factor = 10f64.powi(p as i32);
             let scaled = (v * factor).round();
             // Normalize -0.0 to 0.
@@ -384,7 +383,6 @@ fn push_num(buf: &mut String, numbuf: &mut String, v: f64, precision: Option<u32
                 return;
             }
         }
-    }
     push_num_float(buf, numbuf, v, precision);
 }
 

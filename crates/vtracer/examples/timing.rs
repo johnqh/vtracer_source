@@ -8,7 +8,7 @@
 //!   * Stage 1 (CCL)        — connected-component labeling
 //!   * Stage 2 (merge)      — hierarchical region merging
 //!     (both measured by driving visioncortex's incremental builder directly
-//!      and splitting on its progress() 50% boundary)
+//!     and splitting on its progress() 50% boundary)
 //!   * Segment total        — pipeline.segment(): stage 1+2 + keying + mask build
 //!   * Finish               — pipeline.finish(): color-fit + compose(trace+spline) + optimize
 //!   * SVG write            — serialization

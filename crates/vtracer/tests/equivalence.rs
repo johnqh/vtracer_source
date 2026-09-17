@@ -9,6 +9,8 @@
 //!
 //! `resvg` is a dev-dependency, so this never enters a wasm build.
 
+#![allow(clippy::needless_range_loop)]
+
 use resvg::{tiny_skia, usvg};
 use vtracer::{ColorImage, Config, FitMode, Hierarchical};
 
