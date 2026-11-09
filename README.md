@@ -64,6 +64,36 @@ things differ from upstream:
   replacement for the crates.io 0.6.5 binary with no change to `svgr_api`. **Do
   not remove those aliases without updating `svgr_api/src/services/vtracer.ts`.**
 
+### Building & testing this fork from source
+
+Check out `visioncortex` as a sibling first (the workspace patches its
+`visioncortex` dependency to `../visioncortex`):
+
+```sh
+git clone git@github.com:johnqh/visioncortex.git   # ../visioncortex
+git clone git@github.com:johnqh/vtracer_source.git # this repo, beside it
+cd vtracer_source
+
+cargo build --workspace                 # core lib + CLI + bench
+cargo test  --workspace                 # golden / equivalence / pipeline tests
+cargo build --release -p vtracer-cli    # the shipping `vtracer` binary
+
+# wasm safety check for the library core (what the Node package builds on)
+cargo build --target wasm32-unknown-unknown -p vtracer
+
+# Node (wasm) package
+cd nodejs && wasm-pack build --target nodejs --out-dir pkg && node test.js
+
+# Python (pyo3) extension — needs maturin
+cd crates/vtracer-py && maturin develop
+```
+
+CI (`.github/workflows/rust.yml`) runs the first four on every push/PR; the
+Node and Python jobs mirror the `nodejs` / `crates/vtracer-py` commands above.
+`crates/vtracer-py` and `nodejs` are `exclude`d from the core workspace — build
+them from their own directories (maturin / wasm-pack), not via `cargo
+--workspace`. The legacy `webapp/` is kept in-tree but no longer built.
+
 ## Desktop App
 
 ![screenshot](docs/images/desktop-app.png)
